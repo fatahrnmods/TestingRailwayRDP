@@ -1,30 +1,27 @@
-FROM mcr.microsoft.com/windows/servercore:ltsc2019
-SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+FROM ubuntu:jammy
 
-# Install Chocolatey package manager
-RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
-    iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+SHELL ["/bin/bash", "-c"]
 
-# Install xrdp and xfce desktop environment
-RUN choco install -y xrdp xfce --version=4.14.3.0
+# Update package repository and install necessary packages
+RUN apt-get update && \
+    apt-get install -y xfce4 xrdp && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install ngrok
-RUN choco install -y ngrok
+# Configure RDP session
+RUN sed -i 's/^new_cursors=true/new_cursors=false/g' /etc/xrdp/xrdp.ini && \
+    sed -i 's/^crypt_level=high/crypt_level=none/g' /etc/xrdp/xrdp.ini && \
+    sed -i 's/^#xserverbpp=24/xserverbpp=32/g' /etc/xrdp/xrdp.ini && \
+    sed -i 's/^#max_bpp=24/max_bpp=32/g' /etc/xrdp/xrdp.ini && \
+    echo "xfce4-session" > /etc/skel/.xsession && \
+    echo "session required pam_unix.so" | tee -a /etc/pam.d/xrdp-sesman
 
-# Set ngrok auth token
-ARG NGROK_AUTH_TOKEN
-RUN ngrok authtoken $env:2JaiAWKOJhh7FRWIdIGWWEhEl3O_6PHCFHKnMfuZUsJd2NZp5
+# Allow root login via RDP
+RUN sed -i 's/^#PermitRootLogin prohibit-password/PermitRootLogin yes/g' /etc/ssh/sshd_config && \
+    echo 'root:kinosan' | chpasswd
 
-# Set RDP username and password
-RUN reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UsernameHint /d "kinokino" /f
-RUN reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 1 /f
-RUN net user kinokino kinosan /add
-RUN net localgroup "Remote Desktop Users" kinokino /add
-
-# Expose RDP and ngrok ports
+# Expose RDP port
 EXPOSE 3389
-EXPOSE 4040
 
-# Start ngrok and xrdp on container startup
-CMD ["cmd.exe", "/C", "start", "/B", "ngrok", "tcp", "3389", "--region=jp", "--log=stdout", "&&", "start", "/B", "xrdp"]
+# Start xrdp service on container startup
+CMD service xrdp start && tail -f /dev/null
